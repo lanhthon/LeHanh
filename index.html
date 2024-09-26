@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chỉnh Sửa Dữ Liệu Firebase</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
+
+    <script type="module">
+        const firebaseConfig = {
+            apiKey: "AIzaSyDv6t65cKqzwj_gLP7zaDke3xhEmk0GECQ",
+            authDomain: "lehanh-d7d94.firebaseapp.com",
+            databaseURL: "https://lehanh-d7d94-default-rtdb.firebaseio.com",
+            projectId: "lehanh-d7d94",
+            storageBucket: "lehanh-d7d94.appspot.com",
+            messagingSenderId: "121392910673",
+            appId: "1:121392910673:web:7d6cc566041f48987d4370",
+            measurementId: "G-GG0W1J7B94"
+        };
+
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+        import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+
+        const app = initializeApp(firebaseConfig);
+        const database = getDatabase(app);
+
+        let currentDate = '25-09-2024';
+        let allData = {};
+
+        function fetchData(date) {
+            const dbRef = ref(database, date);
+            get(dbRef).then((snapshot) => {
+                if (snapshot.exists()) {
+                    allData[date] = snapshot.val();
+                    displayData(date);
+                    displayUserTasksCount();
+                } else {
+                    console.log("Không có dữ liệu");
+                }
+            }).catch((error) => {
+                console.error("Lỗi khi lấy dữ liệu: ", error);
+            });
+        }
+
+        function displayData(date) {
+            const container = document.getElementById('data-container');
+            container.innerHTML = '';
+            const dateHeader = document.createElement('h2');
+            dateHeader.innerText = `Ngày: ${date}`;
+            container.appendChild(dateHeader);
+            const data = allData[date];
+
+            for (const category in data) {
+                const categoryHeader = document.createElement('h3');
+                categoryHeader.innerText = category;
+                container.appendChild(categoryHeader);
+                const table = document.createElement('table');
+                table.className = 'data-table';
+
+                const headerRow = document.createElement('tr');
+                const headers = ['STT', 'NỘI DUNG', 'NHÂN SỰ THỰC HIỆN', 'NHÂN SỰ KẾT HỢP', 'DATELINE', 'TIẾN ĐỘ'];
+                headers.forEach(headerText => {
+                    const th = document.createElement('th');
+                    th.innerText = headerText;
+                    headerRow.appendChild(th);
+                });
+                table.appendChild(headerRow);
+
+                data[category].forEach((item, index) => {
+                    const itemRow = document.createElement('tr');
+
+                    itemRow.innerHTML = `
+                        <td>${item.STT}</td>
+                        <td><input type="text" value="${item['Noi-dung']}" onchange="updateData('${category}', ${index}, 'Noi-dung', this.value)"></td>
+                        <td><input type="text" value="${item['Nhan-su-thuc-hien']}" onchange="updateData('${category}', ${index}, 'Nhan-su-thuc-hien', this.value)"></td>
+                        <td><input type="text" value="${item['Nhan-su-ket-hop'] || ''}" onchange="updateData('${category}', ${index}, 'Nhan-su-ket-hop', this.value)"></td>
+                        <td><input type="text" value="${item.Dateline || ''}" onchange="updateData('${category}', ${index}, 'Dateline', this.value)"></td>
+                        <td><input type="text" value="${item['Tien-do']}" onchange="updateData('${category}', ${index}, 'Tien-do', this.value)"></td>
+                    `;
+                    table.appendChild(itemRow);
+                });
+
+                container.appendChild(table);
+            }
+        }
+
+        function switchDate(date) {
+            currentDate = date;
+            displayData(date);
+        }
+
+        function displayUserTasksCount() {
+            const summaryContainer = document.getElementById('summary-container');
+            summaryContainer.innerHTML = ''; // Xóa nội dung trước đó
+
+            const summaryHeader = document.createElement('h3');
+            summaryHeader.innerText = 'Tổng hợp công việc tháng 9';
+            const exportButton = document.createElement('button');
+
+            summaryContainer.appendChild(summaryHeader);
+            exportButton.innerText = 'Xuất Excel';
+            exportButton.onclick = exportToExcel;
+            summaryContainer.appendChild(exportButton);
+
+            let userTasksCount = {};
+
+            // Lấy dữ liệu từ cả hai ngày
+            for (const date of ['25-09-2024', '26-09-2024']) {
+                if (allData[date]) {
+                    const data = allData[date];
+                    for (const category in data) {
+                        data[category].forEach(item => {
+                            const taskContent = item['Noi-dung']; // Lấy tên công việc từ cột Nội dung
+                            const users = [item['Nhan-su-thuc-hien'], item['Nhan-su-ket-hop']];
+
+                            users.forEach(user => {
+                                if (user) {
+                                    if (!userTasksCount[user]) {
+                                        userTasksCount[user] = {
+                                            total: 0,
+                                            completed: 0,
+                                            lateCount: 0,
+                                            dateline: new Set(), // Thay đổi thành Set để theo dõi dateline duy nhất
+                                            uniqueTasks: new Set()
+                                        };
+                                    }
+
+                                    // Kiểm tra xem công việc đã được tính chưa
+                                    if (!userTasksCount[user].uniqueTasks.has(taskContent)) {
+                                        userTasksCount[user].total++;
+                                        userTasksCount[user].uniqueTasks.add(taskContent); // Thêm công việc vào tập hợp đã tính
+
+                                        // Kiểm tra công việc đã hoàn thành
+                                        if (item['Tien-do'] && item['Tien-do'].includes("Đã hoàn thành")) {
+                                            userTasksCount[user].completed++;
+                                        }
+
+                                        // Thêm dateline vào tổng hợp
+                                        if (item.Dateline) {
+                                            userTasksCount[user].dateline.add(item.Dateline); // Sử dụng Set để theo dõi dateline duy nhất
+                                        }
+
+                                        // Kiểm tra nếu công việc trễ hạn
+                                        if (item.Dateline) {
+                                            const datelineDate = new Date(item.Dateline.split('/').reverse().join('-'));
+                                            const currentDateObj = new Date();
+                                            if (datelineDate < currentDateObj) {
+                                                userTasksCount[user].lateCount++; // Tăng số lượng công việc trễ
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        });
+                    }
+                }
+            }
+
+            const summaryTable = document.createElement('table');
+            summaryTable.className = 'data-table';
+
+            const summaryHeaderRow = document.createElement('tr');
+            summaryHeaderRow.innerHTML = `<th>Nhân Sự</th><th>Tổng Công Việc</th><th>Công Việc Hoàn Thành</th><th>Số Công Việc Trễ</th><th>Dateline</th>`;
+            summaryTable.appendChild(summaryHeaderRow);
+
+            for (const user in userTasksCount) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+            <td>${user}</td>
+            <td>${userTasksCount[user].total}</td>
+            <td>${userTasksCount[user].completed}</td>
+            <td>${userTasksCount[user].lateCount}</td>
+            <td>${Array.from(userTasksCount[user].dateline).join(', ')}</td> <!-- Chuyển Set thành Array để hiển thị -->
+        `;
+                summaryTable.appendChild(row);
+            }
+
+            summaryContainer.appendChild(summaryTable);
+        }
+
+
+
+        function exportToExcel() {
+            const header = ["Nhân Sự", "Tổng Công Việc", "Công Việc Hoàn Thành", "Số Công Việc Trễ", "Dateline"];
+
+            const summaryContainer = document.getElementById('summary-container');
+            const rows = summaryContainer.querySelectorAll('table tr');
+
+            // Tạo một mảng để chứa dữ liệu
+            const data = [];
+            data.push(header); // Thêm tiêu đề vào mảng dữ liệu
+
+            // Duyệt qua các hàng để lấy dữ liệu
+            rows.forEach((row, index) => {
+                const cols = row.querySelectorAll('td, th');
+                const rowData = Array.from(cols).map(col => col.innerText);
+                if (index > 0) { // Bỏ qua tiêu đề
+                    data.push(rowData);
+                }
+            });
+
+            // Tạo workbook và worksheet
+            const workbook = XLSX.utils.book_new();
+            const worksheet = XLSX.utils.aoa_to_sheet(data);
+
+            // Thêm worksheet vào workbook
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Summary");
+
+            // Xuất file Excel
+            XLSX.writeFile(workbook, "tongsom-congviec.xlsx");
+        }
+
+
+        window.onload = () => {
+            fetchData('25-09-2024');
+            fetchData('26-09-2024');
+
+            const tabContainer = document.createElement('div');
+            const tabButton1 = document.createElement('button');
+            tabButton1.innerText = '25-09-2024';
+            tabButton1.onclick = () => switchDate('25-09-2024');
+            tabContainer.appendChild(tabButton1);
+
+            const tabButton2 = document.createElement('button');
+            tabButton2.innerText = '26-09-2024';
+            tabButton2.onclick = () => switchDate('26-09-2024');
+            tabContainer.appendChild(tabButton2);
+
+
+
+            document.body.insertBefore(tabContainer, document.getElementById('data-container'));
+        };
+    </script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f0f4f8;
+            /* Màu nền nhẹ nhàng và dễ chịu */
+            color: #333;
+            /* Màu chữ tối để dễ đọc */
+        }
+
+        h1 {
+            font-size: 28px;
+            /* Kích thước chữ cho tiêu đề chính */
+            color: #2c3e50;
+            /* Màu chữ tối cho tiêu đề chính */
+            text-align: center;
+            /* Căn giữa cho tiêu đề */
+            margin-bottom: 30px;
+            /* Khoảng cách dưới tiêu đề */
+            text-transform: uppercase;
+            /* Chữ in hoa */
+            letter-spacing: 2px;
+            /* Khoảng cách giữa các chữ cái */
+        }
+
+        h2 {
+            font-size: 24px;
+            /* Kích thước chữ cho tiêu đề phụ */
+            color: #2980b9;
+            /* Màu chữ cho tiêu đề phụ */
+            margin-top: 20px;
+            /* Khoảng cách trên cho tiêu đề phụ */
+            margin-bottom: 10px;
+            /* Khoảng cách dưới cho tiêu đề phụ */
+        }
+
+        h3 {
+            font-size: 20px;
+            /* Kích thước chữ cho tiêu đề nhóm */
+            color: #8e44ad;
+            /* Màu chữ cho tiêu đề nhóm */
+            margin-top: 15px;
+            /* Khoảng cách trên cho tiêu đề nhóm */
+            margin-bottom: 5px;
+            /* Khoảng cách dưới cho tiêu đề nhóm */
+        }
+
+        .data-table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            /* Hiệu ứng đổ bóng cho bảng */
+            border-radius: 10px;
+            /* Bo góc cho bảng */
+            overflow: hidden;
+            /* Giúp bo góc cho tiêu đề */
+        }
+
+        .data-table th,
+        .data-table td {
+            border: 1px solid #ddd;
+            padding: 15px;
+            /* Tăng padding để có không gian hơn */
+            text-align: left;
+            transition: background-color 0.3s;
+            /* Hiệu ứng chuyển màu khi hover */
+        }
+
+        .data-table th {
+            background-color: #3498db;
+            /* Màu nền cho tiêu đề */
+            color: white;
+            /* Màu chữ cho tiêu đề */
+            font-weight: bold;
+            /* Làm chữ tiêu đề đậm hơn */
+        }
+
+        .data-table tr {
+            transition: transform 0.3s;
+            /* Thêm hiệu ứng chuyển động cho phóng to */
+        }
+
+        .data-table tr:hover {
+            transform: scale(1.05);
+            /* Hiệu ứng phóng to khi hover vào hàng */
+        }
+
+        .data-table tr:hover td {
+            background-color: #ecf0f1;
+            /* Màu nền cho hàng khi hover */
+        }
+
+        .data-table td {
+            background-color: white;
+            /* Màu nền cho ô dữ liệu */
+            color: #333;
+            /* Màu chữ cho ô dữ liệu */
+        }
+
+        .data-table td:first-child {
+            font-weight: bold;
+            /* Làm nổi bật cột đầu tiên */
+        }
+
+        .data-table td:last-child {
+            text-align: center;
+            /* Căn giữa cho cột cuối cùng */
+        }
+
+        /* Style cho input và button */
+        input[type="text"],
+        input[type="number"] {
+            padding: 12px;
+            border: 1px solid #bdc3c7;
+            border-radius: 5px;
+            /* Bo góc cho ô nhập liệu */
+            width: calc(100% - 24px);
+            /* Đảm bảo ô nhập liệu không chèn vào các cạnh */
+            margin-bottom: 15px;
+            /* Khoảng cách dưới ô nhập liệu */
+            font-size: 14px;
+            /* Kích thước chữ */
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+            /* Hiệu ứng đổ bóng cho input */
+            transition: border-color 0.3s;
+            /* Hiệu ứng chuyển màu cho viền */
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus {
+            border-color: #3498db;
+            /* Màu viền khi ô nhập liệu được chọn */
+            outline: none;
+            /* Bỏ viền ngoài mặc định */
+        }
+
+        button {
+            background-color: #3498db;
+            /* Màu nền cho nút */
+            color: white;
+            /* Màu chữ cho nút */
+            border: none;
+            /* Bỏ viền cho nút */
+            padding: 12px 20px;
+            /* Padding cho nút */
+            border-radius: 5px;
+            /* Bo góc cho nút */
+            cursor: pointer;
+            /* Con trỏ khi hover vào nút */
+            font-size: 16px;
+            /* Kích thước chữ cho nút */
+            transition: background-color 0.3s, transform 0.2s;
+            /* Hiệu ứng chuyển màu và phóng to khi hover */
+        }
+
+        button:hover {
+            background-color: #2980b9;
+            /* Màu nền khi hover vào nút */
+            transform: scale(1.05);
+            /* Hiệu ứng phóng to khi hover */
+        }
+
+        /* Responsive design */
+        @media (max-width: 600px) {
+            .data-table {
+                width: 100%;
+                /* Đảm bảo bảng rộng 100% trên màn hình nhỏ */
+            }
+
+            .data-table th,
+            .data-table td {
+                padding: 10px;
+                /* Giảm padding cho màn hình nhỏ */
+            }
+        }
+
+        .button-container {
+            background-color: #c834db;
+            gap: 10px;
+            text-align: center;
+            padding: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Chỉnh Sửa Dữ Liệu-Demo </h1 <p> để dễ kiểm tra em đã copy 1 công việc như nhau ra 2 ngày (Hoàn thiện mẫu BG của
+    ATP
+    --Hạnh--Dung--20/09/2024--Đã xong phần tiếng Việt, còn phần tiếng Trung) </p>
+    <h1>Quản lý công việc</h1>
+    <p>Góp Ý: phần tiến độ chỉ để 2 phần như( đang làm-đã hoàng thành) kế bên cột tiến độ sẽ là cột ghi chú tiến độ như
+        cột tiến độ hiện tại </p>
+    <div class="button-container">
+        <H1>CÁC CHỨC NĂNG NÀY SẼ THÊM SAU và Giao diện thay đổi theo yêu cầu</H1>
+        <button class="button" onclick="addNewDate()">Thêm Ngày Mới</button>
+        <button class="button" onclick="addTask()">Thêm Công Việc</button>
+        <button class="button" onclick="editTask()">Chỉnh Sửa Công Việc</button>
+        <button class="button" onclick="viewStatistics()">Thống Kê Khác</button>
+        <button class="button" onclick="viewStatistics()">và các chức năng khác theo yêu cầu</button>
+    </div>
+    <div id="data-container"></div>
+    <div id="summary-container">
+        <!-- Tổng hợp công việc theo người sẽ được hiển thị ở đây -->
+    </div>
+</body>
+
+</html>
